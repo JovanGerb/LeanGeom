@@ -1,5 +1,6 @@
 import Mathlib.Tactic.Linarith
 import Mathlib.Algebra.GroupWithZero.Action.Defs
+import Mathlib.Data.Nat.Prime.Defs
 
 instance : Hashable Rat where
   hash | { num, den, ..} => mixHash (hash num) (hash den)
@@ -7,8 +8,8 @@ instance : Hashable Rat where
 @[ext]
 structure AddCircle where
   q : Rat
-  q_ge : 0 ≤ q
-  q_lt : q < 1
+  q_ge : 0 ≤ q := by decide
+  q_lt : q < 1 := by decide
 deriving DecidableEq, Hashable, Ord
 
 namespace AddCircle
@@ -51,6 +52,68 @@ instance : AddCommGroup AddCircle where
   add_comm := by add_circle_tac
 
 end AddCircle
+
+
+
+structure PrimePow where
+  prime : Nat
+  exp : Rat
+
+/-- `PrimeProd` stores the prime factors of a number, in order from smallest to largest. -/
+def PrimeProd := List PrimePow
+deriving Inhabited
+
+namespace PrimeProd
+
+instance : One PrimeProd := ⟨[]⟩
+
+mutual
+
+partial def ofNat (n : Nat) (hn : n ≠ 0) : PrimeProd :=
+  if hn' : n = 1 then 1 else
+  let p := n.minFac
+  have := n.minFac_pos
+  takeFactors p (n / p) 1 (Nat.div_ne_zero_iff.mpr ⟨by omega, Nat.minFac_le (by omega)⟩)
+
+partial def takeFactors (p n acc : Nat) (hn : n ≠ 0) : PrimeProd :=
+  if h : p ∣ n then
+    takeFactors p (n / p) (acc + 1) (by obtain ⟨c, h⟩ := h; simp_all)
+  else
+    ⟨p, acc⟩ :: ofNat n hn
+
+end
+
+instance {n : Nat} [n.AtLeastTwo] : OfNat PrimeProd n := ⟨ofNat n (NeZero.ne n)⟩
+
+def mul (prod prod' : PrimeProd) : PrimeProd :=
+  match prod, prod' with
+  | [], prod => prod
+  | prod, [] => prod
+  | prod@(p :: ps), prod'@(p' :: ps') =>
+    match compare p.prime p'.prime with
+    | .lt => p :: mul ps prod'
+    | .gt => p' :: mul prod ps'
+    | .eq => match p with
+      | ⟨p, n⟩ =>
+        let n := n - p'.exp
+        if n = 0 then
+          mul ps ps'
+        else
+          ⟨p, n⟩ :: mul ps ps'
+termination_by prod.length + prod'.length
+
+def inv (prod : PrimeProd) : PrimeProd :=
+  prod.map fun ⟨p, n⟩ => ⟨p, -n⟩
+
+def pow (prod : PrimeProd) (n : Rat) : PrimeProd :=
+  if n = 0 then 1 else prod.map fun ⟨p, n'⟩ => ⟨p, n * n'⟩
+
+
+instance : Mul PrimeProd := ⟨mul⟩
+instance : Inv PrimeProd := ⟨inv⟩
+instance : Pow PrimeProd Rat := ⟨pow⟩
+
+end PrimeProd
 
 
 
