@@ -221,18 +221,3 @@ instance {α} [SubtractionCommMonoid α] : DistribMulAction SignGroup α where
   smul_add  := by sign_tac; apply neg_add
 
 end SignGroup
-
-
-
--- def LComb (α : Type) := List (Int × α)
-
--- namespace LComb
-
--- alias Perm := List.Perm
-
--- variable {α : Type}
-
--- instance [CommGroup α] : CommGroup (LComb α) where
---   mul a b :=
-
--- end LComb
