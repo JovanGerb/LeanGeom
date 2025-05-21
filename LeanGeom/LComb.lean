@@ -21,11 +21,27 @@ def Int.xgcd (x y : Int) : Int × Int × Int :=
 inductive LSum (G α : Type) where
 | cons : G → α → LSum G α → LSum G α
 | nil : LSum G α
+deriving Inhabited, BEq, Hashable
 
 namespace LSum
 
 attribute [local instance] ltOfOrd
 variable {G H α β : Type} [Zero G] [One G] [Add G] [Neg G] [Sub G] [Mul G] [DecidableEq G] [Ord α]
+
+def single (a : α) : LSum G α := .cons 1 a .nil
+
+def cons' (g : G) (a : α) (s : LSum G α) : LSum G α :=
+  if g = 0 then s else .cons g a s
+
+@[specialize]
+def foldl (f : α → G → β → α) (init : α) : LSum G β → α
+| .nil => init
+| .cons g b s => foldl f (f init g b) s
+
+@[specialize]
+def foldlM {m : Type → Type} [Monad m] (f : α → G → β → m α) (init : α) : LSum G β → m α
+| .nil => pure init
+| .cons g b s => do foldlM f (← f init g b) s
 
 def reverseAux (s acc : LSum G α) : LSum G α :=
   match s with
@@ -35,63 +51,44 @@ def reverseAux (s acc : LSum G α) : LSum G α :=
 def reverse (s : LSum G α) : LSum G α := reverseAux s .nil
 
 @[specialize]
-def mapAux (f : G → H) (f' : α → β) : LSum G α → LSum H β → LSum H β
+def mapAux (f : G → H) : LSum G α → LSum H α → LSum H α
   | .nil => reverse
-  | .cons g a s => (mapAux f f' s <| .cons (f g) (f' a) ·)
+  | .cons g a s => (mapAux f s <| .cons (f g) (a) ·)
 
-/-- Require that `f g = 0 → g = 0`. -/
+/-- Require that `g ≠ 0 → f g ≠ 0`. -/
 @[specialize]
-def map (f : G → H) (f' : α → β) (s : LSum G α) : LSum H β := mapAux f f' s .nil
+def map (f : G → H) (s : LSum G α) : LSum H α := mapAux f s .nil
 
 @[specialize]
-partial def addAux (s₁ s₂ acc : LSum G α) : LSum G α :=
+partial def zipWithAux (f : G → G → G) (f₁ f₂ : G → G) (s₁ s₂ acc : LSum G α) : LSum G α :=
   match s₁ with
-  | .nil => reverseAux acc s₂
+  | .nil => reverseAux acc (map f₂ s₂)
   | .cons g₁ a₁ t₁ =>
     match s₂ with
-    | .nil => reverseAux acc s₁
+    | .nil => reverseAux acc (map f₁ s₁)
     | .cons g₂ a₂ t₂ =>
       match compare a₁ a₂ with
-      | .lt => addAux t₁ s₂ (.cons g₁ a₁ acc)
-      | .eq =>
-        if g₁ + g₂ = 0 then
-          addAux t₁ t₂ (.cons (g₁ + g₂) a₁ acc)
-        else
-          addAux t₁ t₂ acc
-      | .gt => addAux s₁ t₂ (.cons g₂ a₂ acc)
+      | .lt => zipWithAux f f₁ f₂ t₁ s₂ (.cons (f₁ g₁) a₁ acc)
+      | .eq => zipWithAux f f₁ f₂ t₁ t₂ (.cons' (f (f₁ g₁) (f₂ g₂)) a₁ acc)
+      | .gt => zipWithAux f f₁ f₂ s₁ t₂ (.cons (f₂ g₂) a₂ acc)
 
-@[specialize]
-partial def subAux (s₁ s₂ acc : LSum G α) : LSum G α :=
-  match s₁ with
-  | .nil => reverseAux acc s₂
-  | .cons g₁ a₁ t₁ =>
-    match s₂ with
-    | .nil => reverseAux acc s₁
-    | .cons g₂ a₂ t₂ =>
-      match compare a₁ a₂ with
-      | .lt => subAux t₁ s₂ (.cons g₁ a₁ acc)
-      | .eq =>
-        if g₁ = g₂ then
-          subAux t₁ t₂ (.cons (g₁ - g₂) a₁ acc)
-        else
-          subAux t₁ t₂ acc
-      | .gt => subAux s₁ t₂ (.cons g₂ a₂ acc)
+@[inline] def zipWith (f : G → G → G) (f₁ f₂ : G → G) (s₁ s₂ : LSum G α) : LSum G α := zipWithAux f f₁ f₂ s₁ s₂ .nil
 
 instance : Zero (LSum G α) := ⟨.nil⟩
 
 instance : Coe α (LSum G α) := ⟨fun a => .cons 1 a .nil⟩
 
-@[inline] instance : Neg (LSum G α) := ⟨fun a => a.map (-·) id⟩
+@[inline] instance : Neg (LSum G α) := ⟨fun a => a.map (-·)⟩
 
-@[inline] instance : SMul G (LSum G α) := ⟨fun g a => a.map (g * ·) id⟩
+@[inline] instance : SMul G (LSum G α) := ⟨fun g a => a.map (g * ·)⟩
 
-@[inline] instance : Add (LSum G α) := ⟨fun a b => addAux a b .nil⟩
+@[inline] instance : Add (LSum G α) := ⟨fun a b => zipWith (· + ·) id id a b⟩
 
-@[inline] instance : Sub (LSum G α) := ⟨fun a b => subAux a b .nil⟩
+@[inline] instance : Sub (LSum G α) := ⟨fun a b => zipWith (· - ·) id id a b⟩
 
 end LSum
 
-structure LComb (G H α π : Type) where
+structure LComb (G α H π : Type) where
   sum : LSum G α
   const : H
   pf : LSum G π
@@ -117,16 +114,17 @@ structure LComb (G H α π : Type) where
 
 -- end LComb
 
-structure IntCombContext (G α π : Type) [BEq α] [Hashable α] where
-  ctx : Std.HashMap α (Int × LComb Int G α π)
+structure IntCombContext (α G π : Type) [BEq α] [Hashable α] where
+  ctx : Std.HashMap α (Int × LComb Int α G π) := {}
+deriving Inhabited
 
 namespace IntCombContext
 
 variable {G α π} [Add G] [Sub G] [SMul Int G] [BEq α] [Hashable α] [Ord α] [Ord π]
 
-variable (ref : IO.Ref (IntCombContext G α π))
+variable (ref : IO.Ref (IntCombContext α G π))
 
-partial def simplifyAux (sum : LSum Int α) (g : G) (pf : LSum Int π) (acc : LSum Int α) : IO (LComb Int G α π) := do
+partial def simplifyAux (sum : LSum Int α) (g : G) (pf : LSum Int π) (acc : LSum Int α) : IO (LComb Int α G π) := do
   match sum with
   | .nil => return ⟨acc.reverse, g, pf⟩
   | .cons n a sum =>
@@ -143,14 +141,14 @@ partial def simplifyAux (sum : LSum Int α) (g : G) (pf : LSum Int π) (acc : LS
         simplifyAux sum g pf (.cons n a acc)
       else
         let n := n % a_n
-        simplifyAux (sum - div • a_sum) (g - div • a_g) (pf - div • a_pf) (if n = 0 then acc else .cons n a acc)
+        simplifyAux (.zipWith (· - ·) id (div * ·) sum a_sum) (g - div • a_g) (.zipWith (· - ·) id (div * ·) pf a_pf) (if n = 0 then acc else .cons n a acc)
 
-def simplify (sum : LSum Int α) (g : G) (pf : LSum Int π) : IO (LComb Int G α π) :=
+def simplify (sum : LSum Int α) (g : G) (pf : LSum Int π) : IO (LComb Int α G π) :=
   simplifyAux ref sum g pf .nil
 
 variable [Zero G] [DecidableEq G]
 
-partial def insert (comb : LComb Int G α π) : IO (Option (LSum Int π)) := do
+partial def insert (comb : LComb Int α G π) : IO (Option (LSum Int π)) := do
   match comb with
   | ⟨.nil, g, pf⟩ => if g = 0 then return none else return pf
   | ⟨.cons n a sum, g, pf⟩ =>
@@ -162,27 +160,28 @@ partial def insert (comb : LComb Int G α π) : IO (Option (LSum Int π)) := do
       return none
     | some (a_n, ⟨a_sum, a_g, a_pf⟩) =>
       if n % a_n = 0 then
-        insert ⟨sum - (n / a_n) • a_sum, g - (n / a_n) • a_g, pf - (n / a_n) • a_pf⟩
+        insert ⟨.zipWith (· - ·) id ((n / a_n) * ·) sum a_sum, g - (n / a_n) • a_g, .zipWith (· - ·) id ((n / a_n) * ·) pf a_pf⟩
       else
         ref.modify fun ⟨ctx⟩ => ⟨ctx.erase a⟩
         let (gcd, x, y) := Int.xgcd n a_n
-        let red ← simplify ref (x • sum + y • a_sum) (x • g + y • a_g) (x • pf + y • a_pf)
+        let red ← simplify ref (.zipWith (· + ·) (x * ·) (y * ·) sum a_sum) (x • g + y • a_g) (.zipWith (· + ·) (x * ·) (y * ·) pf a_pf)
         ref.modify fun ⟨ctx⟩ => ⟨ctx.insert a (gcd, red)⟩
-        insert ⟨sum - (n / gcd) • red.sum, g - (n / gcd) • red.const, pf - (n / gcd) • red.pf⟩
+        insert ⟨.zipWith (· - ·) id ((n / gcd) * ·) sum red.sum, g - (n / gcd) • red.const, .zipWith (· - ·) id ((n / gcd) * ·) pf red.pf⟩
 
 end IntCombContext
 
 
-structure RatCombContext (G α π : Type) [BEq α] [Hashable α] where
-  ctx : Std.HashMap α (LComb Rat G α π)
+structure RatCombContext (α G π : Type) [BEq α] [Hashable α] where
+  ctx : Std.HashMap α (LComb Rat α G π) := {}
+deriving Inhabited
 
 namespace RatCombContext
 
 variable {G α π} [Add G] [Sub G] [SMul Rat G] [BEq α] [Hashable α] [Ord α] [Ord π]
 
-variable (ref : IO.Ref (RatCombContext G α π))
+variable (ref : IO.Ref (RatCombContext α G π))
 
-partial def simplifyAux (sum : LSum Rat α) (g : G) (pf : LSum Rat π) (acc : LSum Rat α) : IO (LComb Rat G α π) := do
+partial def simplifyAux (sum : LSum Rat α) (g : G) (pf : LSum Rat π) (acc : LSum Rat α) : IO (LComb Rat α G π) := do
   match sum with
   | .nil => return ⟨acc.reverse, g, pf⟩
   | .cons n a sum =>
@@ -195,12 +194,12 @@ partial def simplifyAux (sum : LSum Rat α) (g : G) (pf : LSum Rat π) (acc : LS
       ref.modify fun ⟨ctx⟩ => ⟨ctx.insert a a_new⟩
       simplifyAux (sum - n • a_sum) (g - n • a_g) (pf - n • a_pf) acc
 
-def simplify (sum : LSum Rat α) (g : G) (pf : LSum Rat π) : IO (LComb Rat G α π) :=
+def simplify (sum : LSum Rat α) (g : G) (pf : LSum Rat π) : IO (LComb Rat α G π) :=
   simplifyAux ref sum g pf .nil
 
 variable [Zero G] [DecidableEq G]
 
-partial def insert (comb : LComb Rat G α π) : IO (Option (LSum Rat π)) := do
+partial def insert (comb : LComb Rat α G π) : IO (Option (LSum Rat π)) := do
   match comb with
   | ⟨.nil, g, pf⟩ => if g = 0 then return none else return pf
   | ⟨.cons n a sum, g, pf⟩ =>
