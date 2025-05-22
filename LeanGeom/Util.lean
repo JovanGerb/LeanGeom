@@ -12,6 +12,9 @@ structure RatAngle where
   q_lt : q < 1 := by decide
 deriving DecidableEq, Hashable, Ord
 
+instance : Repr RatAngle where
+  reprPrec r _ := repr r.q ++ "τ"
+
 namespace RatAngle
 
 instance : Zero RatAngle where

@@ -21,7 +21,7 @@ def Int.xgcd (x y : Int) : Int × Int × Int :=
 inductive LSum (G α : Type) where
 | cons : G → α → LSum G α → LSum G α
 | nil : LSum G α
-deriving Inhabited, BEq, Hashable
+deriving Inhabited, BEq, Hashable, Repr
 
 namespace LSum
 
@@ -94,6 +94,7 @@ structure LComb (G α H π : Type) where
   sum : LSum G α
   const : H
   pf : LSum G π
+deriving Repr
 
 namespace LComb
 

@@ -5,18 +5,18 @@ import LeanGeom.Atomize
 
 structure Point where
   self : Lean.Expr
-deriving Inhabited, BEq, Hashable
+deriving Inhabited, BEq, Hashable, Repr
 
 structure Equal (α : Type) where (lhs rhs : α)
 structure NotEqual (α : Type) where (lhs rhs : α)
 
 structure Ray where (A B : Point)
-deriving Inhabited, BEq, Hashable
+deriving Inhabited, BEq, Hashable, Repr
 
 structure AngleSum where
   sum : List (Int × Ray)
   θ : RatAngle
-deriving Inhabited, BEq, Hashable
+deriving Inhabited, BEq, Hashable, Repr
 
 structure Segment where (A B : Point)
 
@@ -27,7 +27,7 @@ structure Ratio where
 inductive Proposition where
 | angleEqZero (angle : AngleSum)
 | angleNeqZero (angle : AngleSum)
-deriving Inhabited, BEq, Hashable
+deriving Inhabited, BEq, Hashable, Repr
 
 initialize propositionState : IO.Ref (AtomContext Proposition) ← IO.mkRef {}
 
@@ -38,6 +38,11 @@ inductive Reason where
 deriving Inhabited, BEq
 
 initialize proofState : IO.Ref (Std.HashMap (Atomic Proposition) Reason) ← IO.mkRef {}
+
+def addProof (prop : Atomic Proposition) (pf : Reason) : IO Unit := do
+  if !(← proofState.get).contains prop then
+    proofState.modify (·.insert prop pf)
+
 def getProof (prop : Atomic Proposition) : IO Reason := do
   match (← proofState.get)[prop]? with
   | some pf => return pf

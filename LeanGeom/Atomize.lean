@@ -2,7 +2,7 @@ import Std
 
 structure Atomic (α : Type) where
   id : Nat
-deriving Inhabited
+deriving Inhabited, Repr
 
 variable {α : Type} [BEq α] [Hashable α]
 

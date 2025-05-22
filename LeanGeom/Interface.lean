@@ -1,8 +1,8 @@
-import LeanGeom.Defs
-import Mathlib.Geometry.Euclidean.Angle.Oriented.Basic
+import LeanGeom.AngleArith
+import LeanGeom.Delab
 import Mathlib.Tactic.NormNum.Core
 
-local notation "∠" A:max B:max => Complex.orientation.oangle A B
+
 instance : Fact <| Module.finrank ℝ ℂ = 2 := ⟨Complex.finrank_real_complex⟩
 
 open Qq Lean Elab Tactic Mathlib.Meta
@@ -31,6 +31,7 @@ partial def obtainAngle (x : Q(Real.Angle)) : OptionT MetaM AngleSum := do
   | ~q(-$a) =>
     let a ← obtainAngle a
     return -a
+  | ~q(0) => return { sum := [], θ := 0}
   | _ => failure
 
 def obtainFact (pf : Expr) : StateT Facts MetaM Unit := do
@@ -41,175 +42,119 @@ def obtainFact (pf : Expr) : StateT Facts MetaM Unit := do
     let some b ← (obtainAngle b).run | return
     modify fun facts => { facts with angles := facts.angles.push (a - b) }
     let prop ← atomize propositionState (.angleEqZero (a - b))
-    proofState.modify fun s => s.insert prop (.given pf)
+    addProof prop (.given pf)
+  -- | ~q(($a : Real.Angle) ≠ $b)
+  | ~q(¬($a : Real.Angle) = $b) =>
+    let some a ← (obtainAngle a).run | return
+    let some b ← (obtainAngle b).run | return
+    modify fun facts => { facts with nangles := facts.angles.push (a - b) }
+    let prop ← atomize propositionState (.angleNeqZero (a - b))
+    addProof prop (.given pf)
   | _ => return
 
 def obtainFacts : TacticM Facts := do
-  withMainContext do
-    let mut facts : Facts := {}
-    for decl in (← getLCtx) do
-      facts := (← (obtainFact decl.toExpr).run facts).2
-    return facts
+  let mut facts : Facts := {}
+  for decl in (← getLCtx) do
+    facts := (← (obtainFact decl.toExpr).run facts).2
+  return facts
 
 
-
-
-def delabInt (n : Int) : MetaM Term :=
-  if n ≥ 0 then
-    `($(Syntax.mkNatLit n.natAbs))
-  else
-    `(-$(Syntax.mkNatLit n.natAbs))
-
-def delabRat (q : Rat) : MetaM Term := do
-  if q.den = 1 then
-    delabInt q.num
-  else
-    `($(← delabInt q.num) / $(Syntax.mkNatLit q.den))
-
-def delabRatAngle (angle : RatAngle) : MetaM Term := do
-  if angle = 0 then
-    return Syntax.mkNatLit 0
-  else
-    let q ← delabRat (2 * angle.q)
-    `($q * Real.pi)
-
-def delabPoint : Point → MetaM Term
-  | ⟨.fvar fvarId⟩ => do
-    let name ← fvarId.getUserName
-    `($(Syntax.mkNameLit name.toString))
-  | ⟨point⟩ => throwError "don't know how to elaborate {point}"
-
-def delabRay (r : Ray) : MetaM Term := do
-  let A ← delabPoint r.A
-  let B ← delabPoint r.B
-  `(∠ $A $B)
-
-
-def delabAngleSum (angle : AngleSum) : MetaM Term := do
-  if angle.sum.isEmpty then
-    delabRatAngle angle.θ
-  else
-    let sum ← delabSum angle.sum
-    if angle.θ = 0 then
-      return sum
-    let θ ← delabRatAngle angle.θ
-    `($sum + $θ)
-where
-  delabSum : List (Int × Ray) → MetaM Term
-  | (n, r) :: s => do
-    let r ← delabRay r
-    let (n, n_pos) := (n.natAbs, (n ≥ 0 : Bool))
-    let r ←
-      if n = 1 then
-        pure r
-      else
-        `($(Syntax.mkNatLit n) • $r)
-    if s.isEmpty then
-      if n_pos then
-        return r
-      else
-        `(-$r)
-    else
-      let s ← delabSum s
-      if n_pos then
-        `($s + $r)
-      else
-        `($s - $r)
-  | [] => unreachable!
-
-def delabProposition (prop : Proposition) : MetaM Term := do
-  match prop with
-  | .angleEqZero angle => `($(← delabAngleSum angle) = 0)
-  | .angleNeqZero angle => `($(← delabAngleSum angle) ≠ 0)
-
-
-
-
-
-def delabLinearComb (names : Std.HashMap (Atomic Proposition) NameLit) : List (Int × (Atomic Proposition)) → MetaM Term
-  | (n, prop) :: s => do
-    let h : Term := names[prop]!
-    let (n, n_pos) := (n.natAbs, (n ≥ 0 : Bool))
-    let h ←
-      if n = 1 then
-        pure h
-      else
-        `($(Syntax.mkNatLit n) * $h)
-    if s.isEmpty then
-      if n_pos then
-        return h
-      else
-        `(-$h)
-    else
-      let s ← delabLinearComb names s
-      if n_pos then
-        `($s + $h)
-      else
-        `($s - $h)
-  | [] => unreachable!
-
-
-def delabReason (reason : Reason) (names : Std.HashMap (Atomic Proposition) NameLit) : MetaM Term := do
-  match reason with
-  | .app lem args =>
-    let lem := Syntax.mkNameLit lem.toString
-    let argNames : Array NameLit := args.map (names[·]!)
-    return Syntax.mkApp lem argNames
-  | .angleComb comb => `(by linear_combination (norm := abel) $(← delabLinearComb names comb):term)
-  | .given (.fvar fvarId) =>
-    let name ← fvarId.getUserName
-    `($(Syntax.mkNameLit name.toString))
-  | .given pf => throwError "don't know how to elaborate proof {pf}"
 
 
 
 structure ProofState where
-  propMap : Std.HashMap (Atomic Proposition) NameLit
-  props : Array (Atomic Proposition)
-  nameGen : NameGenerator
+  names : Std.HashMap (Atomic Proposition) NameLit := {}
+  props : Array (Atomic Proposition) := #[]
+  nameGen : NameGenerator := { namePrefix := `h }
 
-partial def nextName (nameGen : NameGenerator) : MetaM (Name × NameGenerator) := do
+abbrev PrintM := StateT ProofState TermElabM
+
+partial def nextName : PrintM Name := do
+  let { nameGen, .. } ← get
+  modify ({ · with nameGen := nameGen.next })
   let name := match nameGen.namePrefix with
     | .str p s => Name.mkStr p (s ++ "_" ++ toString nameGen.idx)
     | n       => Name.mkStr n ("_" ++ toString nameGen.idx)
   if (← getLCtx).findFromUserName? name |>.isSome then
-    nextName (nameGen.next)
+    nextName
   else if (← getEnv).find? name |>.isSome then
-    nextName (nameGen.next)
+    nextName
   else
-    return (name, nameGen.next)
+    return name
 
-def ProofState.insert (prop : Atomic Proposition) (s : ProofState) : MetaM ProofState := do
-  let (name, nameGen) ← nextName s.nameGen
-  return {
-    propMap := s.propMap.insert prop (Syntax.mkNameLit name.toString)
+def PrintM.insert (prop : Atomic Proposition) : PrintM Unit := do
+  let name ← nextName
+  let stx ← `(name| $(Syntax.mkNameLit name.toString))
+  modify fun s => { s with
+    names := s.names.insert prop stx
     props := s.props.push prop
-    nameGen
   }
 
-partial def collectUsedPropsAux (prop : Atomic Proposition) : StateT ProofState MetaM Unit := do
+partial def collectUsedPropsAux (prop : Atomic Proposition) : PrintM Unit := do
   let s ← get
-  if s.propMap.contains prop then return
+  if s.names.contains prop then return
   match ← getProof prop with
   | .app _ args => args.forM collectUsedPropsAux
   | .angleComb comb => comb.forM (collectUsedPropsAux ·.2)
   | .given _ => pure ()
-  let s ← get
-  set (← s.insert prop)
+  .insert prop
 
-def collectUsedProps (pf : CompleteProof) : StateT ProofState MetaM Unit := do
+def collectUsedProps (pf : CompleteProof) : PrintM Unit := do
   match pf with
   | .byContra pos neg => collectUsedPropsAux pos; collectUsedPropsAux neg
   | .angleEqZero comb => comb.forM (collectUsedPropsAux ·.2)
 
-def delabLine (prop : Atomic Proposition) (names : Std.HashMap (Atomic Proposition) NameLit) : MetaM Lean.Syntax.Tactic := do
+def delabLine (prop : Atomic Proposition) : PrintM Lean.Syntax.Tactic := do
+  let { names, .. } ← get
   let nameStx := names[prop]!
   let propStx ← delabProposition (← deAtomize propositionState prop)
   let pf ← getProof prop
   let pfStx ← delabReason pf names
+  let z ← Elab.Term.elabTerm pfStx none
+  logInfo m! "ha {z}, {pfStx}"
   `(tactic| have $nameStx:name : $propStx := $pfStx)
 
-def delabProof (props : Array (Atomic Proposition)) (names : Std.HashMap (Atomic Proposition) NameLit) : MetaM (TSyntax `Lean.Parser.Tactic.tacticSeq) := do
-  let mut lines ← props.mapM fun prop => delabLine prop names
 
-  `(tacticSeq| $[$lines]*)
+-- def delabProof (props : Array (Atomic Proposition)) (names : Std.HashMap (Atomic Proposition) NameLit) : MetaM (TSyntax `Lean.Parser.Tactic.tacticSeq) := do
+--   let mut lines ← props.mapM fun prop => delabLine prop names
+
+--   `(tacticSeq| $[$lines]*)
+
+def delabCompleteProof (pf : CompleteProof) : PrintM (TSyntax `tactic) := do
+  collectUsedProps pf
+  let mut lines ← (← get).props.mapM fun prop => delabLine prop
+  match pf with
+  | .byContra pos neg =>
+    let pos ← `($((← get).names[pos]!):name)
+    let neg ← `($((← get).names[neg]!):name)
+    lines := lines.push (← `(tactic| absurd $pos))
+    lines := lines.push (← `(tactic| exact $neg))
+  | .angleEqZero _ => throwError "not yet implemented"
+  `(tactic| $(lines[0]!))
+
+
+elab "lean_geom" : tactic => withMainContext do
+  let facts ← obtainFacts
+  let some proof ← getSolution facts | throwError "no solution was found"
+  let solution ← delabCompleteProof proof |>.run' {}
+  logInfo m! "{solution}"
+  -- Elab.Tactic.evalRunTac solution
+  Elab.Tactic.evalTactic solution
+
+-- example (A B C D E F P : ℂ)
+--     (h₁ : ∠ A E - ∠ A F - ∠ P E + ∠ P F = 0)
+--     (h₂ : ∠ B F - ∠ B D - ∠ P F + ∠ P D = 0)
+--     (h₃ : ∠ C D - ∠ C E - ∠ P D + ∠ P E = 0)
+--     (l₁ : ∠ A E = ∠ C E) (l₂ : ∠ A F = ∠ B F)
+--     (nl₃ : ¬∠ B D = ∠ C D) : False := by
+--   lean_geom
+  -- have h_1 : ∠ B D = ∠ C D := by linear_combination (norm := abel) -h₁ - h₂ - h₃ + l₁ - l₂
+  -- absurd nl₃
+  -- exact h_1
+example (A B C D E F P : ℂ) (h : ∠ B D = ∠ C D) (g : ¬∠ B D = ∠ C D) : False := by
+  set_option trace.profiler true in
+  set_option trace.profiler.threshold 0 in
+  lean_geom
+  -- linear_combination (norm := abel) h
+
+#synth Zero (Real.Angle)
