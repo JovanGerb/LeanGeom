@@ -6,20 +6,20 @@ instance : Hashable Rat where
   hash | { num, den, ..} => mixHash (hash num) (hash den)
 
 @[ext]
-structure AddCircle where
+structure RatAngle where
   q : Rat
   q_ge : 0 ≤ q := by decide
   q_lt : q < 1 := by decide
 deriving DecidableEq, Hashable, Ord
 
-namespace AddCircle
+namespace RatAngle
 
-instance : Zero AddCircle where
+instance : Zero RatAngle where
   zero := { q := 0, q_ge := by decide, q_lt := by decide }
 
-instance : Inhabited AddCircle := ⟨0⟩
+instance : Inhabited RatAngle := ⟨0⟩
 
-instance : Neg AddCircle where
+instance : Neg RatAngle where
   neg θ := {
     q := if θ.q = 0 then 0 else 1 - θ.q
     q_ge := by split <;> linarith [θ.2, θ.3]
@@ -28,21 +28,21 @@ instance : Neg AddCircle where
       | inr h => simp [h.ne', h]
   }
 
-instance : Add AddCircle where
+instance : Add RatAngle where
   add θ θ' := {
     q := let s := (θ.q + θ'.q); if s < 1 then s else s - 1
     q_ge := by dsimp; split <;> linarith [θ.2, θ'.2]
     q_lt := by dsimp; split <;> linarith [θ.3, θ'.3]
   }
 
-theorem q_zero : (0 : AddCircle).q = 0 := rfl
-theorem q_neg (θ : AddCircle) : (-θ).q = if θ.q = 0 then 0 else 1 - θ.q := rfl
-theorem q_add (θ θ' : AddCircle) : (θ + θ').q = if θ.q + θ'.q < 1 then θ.q + θ'.q else θ.q + θ'.q - 1 := rfl
+theorem q_zero : (0 : RatAngle).q = 0 := rfl
+theorem q_neg (θ : RatAngle) : (-θ).q = if θ.q = 0 then 0 else 1 - θ.q := rfl
+theorem q_add (θ θ' : RatAngle) : (θ + θ').q = if θ.q + θ'.q < 1 then θ.q + θ'.q else θ.q + θ'.q - 1 := rfl
 
 local macro "add_circle_tac" : tactic =>
   `(tactic| ((repeat intro ⟨_,_,_⟩); ext; simp [q_zero, q_neg, q_add]; (repeat' split) <;> linarith))
 
-instance : AddCommGroup AddCircle where
+instance : AddCommGroup RatAngle where
   add_assoc := by add_circle_tac
   zero_add := by add_circle_tac
   add_zero := by add_circle_tac
@@ -51,7 +51,7 @@ instance : AddCommGroup AddCircle where
   neg_add_cancel := by add_circle_tac
   add_comm := by add_circle_tac
 
-end AddCircle
+end RatAngle
 
 
 

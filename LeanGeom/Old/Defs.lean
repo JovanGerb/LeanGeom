@@ -11,7 +11,7 @@ deriving Inhabited, DecidableEq, Hashable, Ord
 -- `Angle` lives in `(ℝ/2πℤ) ∪ ⊥`
 inductive Angle where
 | ray (A B : Point)
-| const (θ : AddCircle)
+| const (θ : RatAngle)
 | smul (n : Int) (a : Angle)
 | add (a₁ a₂ : Angle)
 | free (θ : Lean.Name)
@@ -226,7 +226,7 @@ class ProofClass (p : Proposition) where
   pf : Proof p
 
 
--- inductive Angle : (L : List (Int × Angle)) → (θ : AddCircle) → Type where
+-- inductive Angle : (L : List (Int × Angle)) → (θ : RatAngle) → Type where
 -- | perm {l₁ l₂ θ} : l₁.Perm l₂ → Angle l₁ θ → Angle l₂ θ
 -- | nil : Angle [] 0
 -- | append {l₁ l₂ θ₁ θ₂} : Angle l₁ θ₁ → Angle l₂ θ₂ → Angle (l₁ ++ l₂) (θ₁ + θ₂)

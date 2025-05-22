@@ -15,7 +15,7 @@ deriving Inhabited, BEq, Hashable
 
 structure AngleSum where
   sum : List (Int × Ray)
-  θ : AddCircle
+  θ : RatAngle
 deriving Inhabited, BEq, Hashable
 
 structure Segment where (A B : Point)
@@ -34,9 +34,14 @@ initialize propositionState : IO.Ref (AtomContext Proposition) ← IO.mkRef {}
 inductive Reason where
 | app (lem : Lean.Name) (args : Array (Atomic Proposition))
 | angleComb (comb : List (Int × Atomic Proposition))
+| given (pf : Lean.Expr)
 deriving Inhabited, BEq
 
-initialize proofState : IO.Ref (Std.HashMap Proposition Reason) ← IO.mkRef {}
+initialize proofState : IO.Ref (Std.HashMap (Atomic Proposition) Reason) ← IO.mkRef {}
+def getProof (prop : Atomic Proposition) : IO Reason := do
+  match (← proofState.get)[prop]? with
+  | some pf => return pf
+  | none => throw (.userError "proposition doesn't have a proof")
 
 inductive CompleteProof where
 | byContra (pos neg : Atomic Proposition)

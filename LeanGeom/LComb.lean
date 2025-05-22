@@ -28,6 +28,10 @@ namespace LSum
 attribute [local instance] ltOfOrd
 variable {G H α β : Type} [Zero G] [One G] [Add G] [Neg G] [Sub G] [Mul G] [DecidableEq G] [Ord α]
 
+def isNil : LSum G α → Bool
+  | .nil => true
+  | .cons .. => false
+
 def single (a : α) : LSum G α := .cons 1 a .nil
 
 def cons' (g : G) (a : α) (s : LSum G α) : LSum G α :=
@@ -74,17 +78,15 @@ partial def zipWithAux (f : G → G → G) (f₁ f₂ : G → G) (s₁ s₂ acc 
 
 @[inline] def zipWith (f : G → G → G) (f₁ f₂ : G → G) (s₁ s₂ : LSum G α) : LSum G α := zipWithAux f f₁ f₂ s₁ s₂ .nil
 
+def insert (g : G) (a : α) (s : LSum G α) : LSum G α :=
+  zipWith (· + ·) id id (.cons g a .nil) s
+
 instance : Zero (LSum G α) := ⟨.nil⟩
 
-instance : Coe α (LSum G α) := ⟨fun a => .cons 1 a .nil⟩
-
-@[inline] instance : Neg (LSum G α) := ⟨fun a => a.map (-·)⟩
-
-@[inline] instance : SMul G (LSum G α) := ⟨fun g a => a.map (g * ·)⟩
-
-@[inline] instance : Add (LSum G α) := ⟨fun a b => zipWith (· + ·) id id a b⟩
-
-@[inline] instance : Sub (LSum G α) := ⟨fun a b => zipWith (· - ·) id id a b⟩
+-- @[inline] instance : Neg (LSum G α) := ⟨fun a => a.map (-·)⟩
+-- @[inline] instance : SMul G (LSum G α) := ⟨fun g a => a.map (g * ·)⟩
+-- @[inline] instance : Add (LSum G α) := ⟨fun a b => zipWith (· + ·) id id a b⟩
+-- @[inline] instance : Sub (LSum G α) := ⟨fun a b => zipWith (· - ·) id id a b⟩
 
 end LSum
 
@@ -93,26 +95,24 @@ structure LComb (G α H π : Type) where
   const : H
   pf : LSum G π
 
--- namespace LComb
+namespace LComb
 
--- variable {G H α : Type} [Zero G] [Add G] [Neg G] [Sub G] [Mul G] [DecidableEq G] [Ord α]
+variable {G H α π : Type} [Zero G] [Add G] [Neg G] [Sub G] [Mul G] [DecidableEq G] [Ord α]
 
--- def nil [Zero H] : LComb G H α := ⟨.nil, 0⟩
--- def cons (g : G) (a : α) (comb : LComb G H α) : LComb G H α :=
+def isNil [Zero H] [BEq H] : LComb G α H π → Option (LSum G π)
+  | { sum, const, pf } => if sum.isNil && const == 0 then some pf else none
+
+-- def nil [Zero H] : LComb G α H := ⟨.nil, 0⟩
+-- def cons (g : G) (a : α) (comb : LComb G α H) : LComb G α H :=
 --   match comb with
 --   | ⟨s, c⟩ => ⟨.cons g a s, c⟩
 
--- instance [Zero H] : Zero (LComb G H α) := ⟨nil⟩
+-- @[inline] instance [Neg H] : Neg (LComb G α H) := ⟨fun ⟨s, c⟩ => ⟨-s, -c⟩⟩
+-- @[inline] instance [SMul G H] : SMul G (LComb G α H) := ⟨fun g ⟨s, c⟩ => ⟨g • s, g • c⟩⟩
+-- @[inline] instance [Add H] : Add (LComb G α H) := ⟨fun ⟨s, c⟩ ⟨s', c'⟩ => ⟨s + s', c + c'⟩⟩
+-- @[inline] instance [Sub H] : Sub (LComb G α H) := ⟨fun ⟨s, c⟩ ⟨s', c'⟩ => ⟨s - s', c - c'⟩⟩
 
--- @[inline] instance [Neg H] : Neg (LComb G H α) := ⟨fun ⟨s, c⟩ => ⟨-s, -c⟩⟩
-
--- @[inline] instance [SMul G H] : SMul G (LComb G H α) := ⟨fun g ⟨s, c⟩ => ⟨g • s, g • c⟩⟩
-
--- @[inline] instance [Add H] : Add (LComb G H α) := ⟨fun ⟨s, c⟩ ⟨s', c'⟩ => ⟨s + s', c + c'⟩⟩
-
--- @[inline] instance [Sub H] : Sub (LComb G H α) := ⟨fun ⟨s, c⟩ ⟨s', c'⟩ => ⟨s - s', c - c'⟩⟩
-
--- end LComb
+end LComb
 
 structure IntCombContext (α G π : Type) [BEq α] [Hashable α] where
   ctx : Std.HashMap α (Int × LComb Int α G π) := {}
@@ -141,7 +141,7 @@ partial def simplifyAux (sum : LSum Int α) (g : G) (pf : LSum Int π) (acc : LS
         simplifyAux sum g pf (.cons n a acc)
       else
         let n := n % a_n
-        simplifyAux (.zipWith (· - ·) id (div * ·) sum a_sum) (g - div • a_g) (.zipWith (· - ·) id (div * ·) pf a_pf) (if n = 0 then acc else .cons n a acc)
+        simplifyAux (.zipWith (· - ·) id (div * ·) sum a_sum) (g - div • a_g) (.zipWith (· - ·) id (div * ·) pf a_pf) (.cons' n a acc)
 
 def simplify (sum : LSum Int α) (g : G) (pf : LSum Int π) : IO (LComb Int α G π) :=
   simplifyAux ref sum g pf .nil
@@ -192,7 +192,7 @@ partial def simplifyAux (sum : LSum Rat α) (g : G) (pf : LSum Rat π) (acc : LS
       ref.modify fun ⟨ctx⟩ => ⟨ctx.erase a⟩
       let a_new@⟨a_sum, a_g, a_pf⟩ ← simplifyAux a_sum a_g a_pf .nil
       ref.modify fun ⟨ctx⟩ => ⟨ctx.insert a a_new⟩
-      simplifyAux (sum - n • a_sum) (g - n • a_g) (pf - n • a_pf) acc
+      simplifyAux (.zipWith (· - ·) id (n * ·) sum a_sum) (g - n • a_g) (.zipWith (· - ·) id (n * ·) pf a_pf) acc
 
 def simplify (sum : LSum Rat α) (g : G) (pf : LSum Rat π) : IO (LComb Rat α G π) :=
   simplifyAux ref sum g pf .nil
@@ -203,9 +203,9 @@ partial def insert (comb : LComb Rat α G π) : IO (Option (LSum Rat π)) := do
   match comb with
   | ⟨.nil, g, pf⟩ => if g = 0 then return none else return pf
   | ⟨.cons n a sum, g, pf⟩ =>
-    let sum := n⁻¹ • sum
+    let sum := sum.map (n⁻¹ * ·)
     let g := n⁻¹ • g
-    let pf := n⁻¹ • pf
+    let pf := pf.map (n⁻¹ * ·)
     let ⟨ctx⟩ ← ref.get
     match ctx[a]? with
     | none =>
@@ -213,6 +213,6 @@ partial def insert (comb : LComb Rat α G π) : IO (Option (LSum Rat π)) := do
       ref.modify fun ⟨ctx⟩ => ⟨ctx.insert a red⟩
       return none
     | some ⟨a_sum, a_g, a_pf⟩ =>
-      insert ⟨sum - a_sum, g - a_g, pf - a_pf⟩
+      insert ⟨.zipWith (· - ·) id id sum a_sum, g - a_g, .zipWith (· - ·) id id pf a_pf⟩
 
 end RatCombContext
