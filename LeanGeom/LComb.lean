@@ -21,7 +21,7 @@ def Int.xgcd (x y : Int) : Int × Int × Int :=
 inductive LSum (G α : Type) where
 | cons : G → α → LSum G α → LSum G α
 | nil : LSum G α
-deriving Inhabited, BEq, Hashable, Repr
+deriving Inhabited, BEq, Hashable
 
 namespace LSum
 
@@ -47,6 +47,11 @@ def foldlM {m : Type → Type} [Monad m] (f : α → G → β → m α) (init : 
 | .nil => pure init
 | .cons g b s => do foldlM f (← f init g b) s
 
+instance [Repr G] [Repr α] : Repr (LSum G α) where
+  reprPrec s := reprPrec (s.foldl (init := []) (fun l g a => (g, a) :: l)).reverse
+
+-- def reprCoeffs [Repr G] (s : LSum G α) : Std.Format := repr (s.foldl (init := []) (fun l g _ => g :: l)).reverse
+
 def reverseAux (s acc : LSum G α) : LSum G α :=
   match s with
   | .nil => acc
@@ -64,7 +69,7 @@ def mapAux (f : G → H) : LSum G α → LSum H α → LSum H α
 def map (f : G → H) (s : LSum G α) : LSum H α := mapAux f s .nil
 
 @[specialize]
-partial def zipWithAux (f : G → G → G) (f₁ f₂ : G → G) (s₁ s₂ acc : LSum G α) : LSum G α :=
+partial def addWithAux (f₁ f₂ : G → G) (s₁ s₂ acc : LSum G α) : LSum G α :=
   match s₁ with
   | .nil => reverseAux acc (map f₂ s₂)
   | .cons g₁ a₁ t₁ =>
@@ -72,21 +77,22 @@ partial def zipWithAux (f : G → G → G) (f₁ f₂ : G → G) (s₁ s₂ acc 
     | .nil => reverseAux acc (map f₁ s₁)
     | .cons g₂ a₂ t₂ =>
       match compare a₁ a₂ with
-      | .lt => zipWithAux f f₁ f₂ t₁ s₂ (.cons (f₁ g₁) a₁ acc)
-      | .eq => zipWithAux f f₁ f₂ t₁ t₂ (.cons' (f (f₁ g₁) (f₂ g₂)) a₁ acc)
-      | .gt => zipWithAux f f₁ f₂ s₁ t₂ (.cons (f₂ g₂) a₂ acc)
+      | .lt => addWithAux f₁ f₂ t₁ s₂ (.cons (f₁ g₁) a₁ acc)
+      | .eq => addWithAux f₁ f₂ t₁ t₂ (.cons' (f₁ g₁ + f₂ g₂) a₁ acc)
+      | .gt => addWithAux f₁ f₂ s₁ t₂ (.cons (f₂ g₂) a₂ acc)
 
-@[inline] def zipWith (f : G → G → G) (f₁ f₂ : G → G) (s₁ s₂ : LSum G α) : LSum G α := zipWithAux f f₁ f₂ s₁ s₂ .nil
+@[inline] def addWith (f₁ f₂ : G → G) (s₁ s₂ : LSum G α) : LSum G α :=
+  addWithAux f₁ f₂ s₁ s₂ .nil
 
 def insert (g : G) (a : α) (s : LSum G α) : LSum G α :=
-  zipWith (· + ·) id id (.cons g a .nil) s
+  addWith id id (.cons g a .nil) s
 
 instance : Zero (LSum G α) := ⟨.nil⟩
 
 -- @[inline] instance : Neg (LSum G α) := ⟨fun a => a.map (-·)⟩
 -- @[inline] instance : SMul G (LSum G α) := ⟨fun g a => a.map (g * ·)⟩
--- @[inline] instance : Add (LSum G α) := ⟨fun a b => zipWith (· + ·) id id a b⟩
--- @[inline] instance : Sub (LSum G α) := ⟨fun a b => zipWith (· - ·) id id a b⟩
+-- @[inline] instance : Add (LSum G α) := ⟨fun a b => addWith id id a b⟩
+-- @[inline] instance : Sub (LSum G α) := ⟨fun a b => addWith id (-·) a b⟩
 
 end LSum
 
@@ -141,8 +147,8 @@ partial def simplifyAux (sum : LSum Int α) (g : G) (pf : LSum Int π) (acc : LS
       if div = 0 then
         simplifyAux sum g pf (.cons n a acc)
       else
-        let n := n % a_n
-        simplifyAux (.zipWith (· - ·) id (div * ·) sum a_sum) (g - div • a_g) (.zipWith (· - ·) id (div * ·) pf a_pf) (.cons' n a acc)
+        let m := -div
+        simplifyAux (.addWith id (m * ·) sum a_sum) (g + m • a_g) (.addWith id (m * ·) pf a_pf) (.cons' (n % a_n) a acc)
 
 def simplify (sum : LSum Int α) (g : G) (pf : LSum Int π) : IO (LComb Int α G π) :=
   simplifyAux ref sum g pf .nil
@@ -161,13 +167,15 @@ partial def insert (comb : LComb Int α G π) : IO (Option (LSum Int π)) := do
       return none
     | some (a_n, ⟨a_sum, a_g, a_pf⟩) =>
       if n % a_n = 0 then
-        insert ⟨.zipWith (· - ·) id ((n / a_n) * ·) sum a_sum, g - (n / a_n) • a_g, .zipWith (· - ·) id ((n / a_n) * ·) pf a_pf⟩
+        let m := -n / a_n
+        insert ⟨.addWith id (m * ·) sum a_sum, g + m • a_g, .addWith id (m * ·) pf a_pf⟩
       else
         ref.modify fun ⟨ctx⟩ => ⟨ctx.erase a⟩
         let (gcd, x, y) := Int.xgcd n a_n
-        let red ← simplify ref (.zipWith (· + ·) (x * ·) (y * ·) sum a_sum) (x • g + y • a_g) (.zipWith (· + ·) (x * ·) (y * ·) pf a_pf)
+        let red ← simplify ref (.addWith (x * ·) (y * ·) sum a_sum) (x • g + y • a_g) (.addWith (x * ·) (y * ·) pf a_pf)
         ref.modify fun ⟨ctx⟩ => ⟨ctx.insert a (gcd, red)⟩
-        insert ⟨.zipWith (· - ·) id ((n / gcd) * ·) sum red.sum, g - (n / gcd) • red.const, .zipWith (· - ·) id ((n / gcd) * ·) pf red.pf⟩
+        let m := -n / gcd
+        insert ⟨.addWith id (m * ·) sum red.sum, g + m • red.const, .addWith id (m * ·) pf red.pf⟩
 
 end IntCombContext
 
@@ -193,7 +201,8 @@ partial def simplifyAux (sum : LSum Rat α) (g : G) (pf : LSum Rat π) (acc : LS
       ref.modify fun ⟨ctx⟩ => ⟨ctx.erase a⟩
       let a_new@⟨a_sum, a_g, a_pf⟩ ← simplifyAux a_sum a_g a_pf .nil
       ref.modify fun ⟨ctx⟩ => ⟨ctx.insert a a_new⟩
-      simplifyAux (.zipWith (· - ·) id (n * ·) sum a_sum) (g - n • a_g) (.zipWith (· - ·) id (n * ·) pf a_pf) acc
+      let m := -n
+      simplifyAux (.addWith id (m * ·) sum a_sum) (g + m • a_g) (.addWith id (m * ·) pf a_pf) acc
 
 def simplify (sum : LSum Rat α) (g : G) (pf : LSum Rat π) : IO (LComb Rat α G π) :=
   simplifyAux ref sum g pf .nil
@@ -214,6 +223,6 @@ partial def insert (comb : LComb Rat α G π) : IO (Option (LSum Rat π)) := do
       ref.modify fun ⟨ctx⟩ => ⟨ctx.insert a red⟩
       return none
     | some ⟨a_sum, a_g, a_pf⟩ =>
-      insert ⟨.zipWith (· - ·) id id sum a_sum, g - a_g, .zipWith (· - ·) id id pf a_pf⟩
+      insert ⟨.addWith id (-·) sum a_sum, g - a_g, .addWith id (-·) pf a_pf⟩
 
 end RatCombContext
