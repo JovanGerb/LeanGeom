@@ -63,7 +63,7 @@ def obtainFacts : TacticM Facts := do
 
 
 structure ProofState where
-  names : Std.HashMap (Atomic Proposition) NameLit := {}
+  names : Std.HashMap (Atomic Proposition) Ident := {}
   props : Array (Atomic Proposition) := #[]
   nameGen : NameGenerator := { namePrefix := `h }
 
@@ -84,9 +84,8 @@ partial def nextName : PrintM Name := do
 
 def PrintM.insert (prop : Atomic Proposition) : PrintM Unit := do
   let name ← nextName
-  let stx ← `(name| $(Syntax.mkNameLit name.toString))
   modify fun s => { s with
-    names := s.names.insert prop stx
+    names := s.names.insert prop (mkIdent name)
     props := s.props.push prop
   }
 
@@ -107,30 +106,24 @@ def collectUsedProps (pf : CompleteProof) : PrintM Unit := do
 def delabLine (prop : Atomic Proposition) : PrintM Lean.Syntax.Tactic := do
   let { names, .. } ← get
   let nameStx := names[prop]!
-  let propStx ← delabProposition (← deAtomize propositionState prop)
+  let prop' ← deAtomize propositionState prop
+  let propStx ← delabProposition prop'
   let pf ← getProof prop
-  let pfStx ← delabReason pf names
-  let z ← Elab.Term.elabTerm pfStx none
-  logInfo m! "ha {z}, {pfStx}"
-  `(tactic| have $nameStx:name : $propStx := $pfStx)
+  let pfStx ← delabReason pf prop' names
+  `(tactic| have $nameStx : $propStx := $pfStx)
 
 
--- def delabProof (props : Array (Atomic Proposition)) (names : Std.HashMap (Atomic Proposition) NameLit) : MetaM (TSyntax `Lean.Parser.Tactic.tacticSeq) := do
---   let mut lines ← props.mapM fun prop => delabLine prop names
-
---   `(tacticSeq| $[$lines]*)
-
-def delabCompleteProof (pf : CompleteProof) : PrintM (TSyntax `tactic) := do
+def delabCompleteProof (pf : CompleteProof) : PrintM (TSyntax `Lean.Parser.Tactic.tacticSeq) := do
   collectUsedProps pf
   let mut lines ← (← get).props.mapM fun prop => delabLine prop
   match pf with
   | .byContra pos neg =>
-    let pos ← `($((← get).names[pos]!):name)
-    let neg ← `($((← get).names[neg]!):name)
+    let pos := (← get).names[pos]!
+    let neg := (← get).names[neg]!
     lines := lines.push (← `(tactic| absurd $pos))
     lines := lines.push (← `(tactic| exact $neg))
   | .angleEqZero _ => throwError "not yet implemented"
-  `(tactic| $(lines[0]!))
+  `(tacticSeq| $[$lines]*)
 
 
 elab "lean_geom" : tactic => withMainContext do
@@ -138,23 +131,19 @@ elab "lean_geom" : tactic => withMainContext do
   let some proof ← getSolution facts | throwError "no solution was found"
   let solution ← delabCompleteProof proof |>.run' {}
   logInfo m! "{solution}"
-  -- Elab.Tactic.evalRunTac solution
   Elab.Tactic.evalTactic solution
 
--- example (A B C D E F P : ℂ)
---     (h₁ : ∠ A E - ∠ A F - ∠ P E + ∠ P F = 0)
---     (h₂ : ∠ B F - ∠ B D - ∠ P F + ∠ P D = 0)
---     (h₃ : ∠ C D - ∠ C E - ∠ P D + ∠ P E = 0)
---     (l₁ : ∠ A E = ∠ C E) (l₂ : ∠ A F = ∠ B F)
---     (nl₃ : ¬∠ B D = ∠ C D) : False := by
---   lean_geom
-  -- have h_1 : ∠ B D = ∠ C D := by linear_combination (norm := abel) -h₁ - h₂ - h₃ + l₁ - l₂
-  -- absurd nl₃
-  -- exact h_1
-example (A B C D E F P : ℂ) (h : ∠ B D = ∠ C D) (g : ¬∠ B D = ∠ C D) : False := by
-  set_option trace.profiler true in
-  set_option trace.profiler.threshold 0 in
-  lean_geom
-  -- linear_combination (norm := abel) h
+example (A B C D E F P : ℂ)
+    (h₁ : ∠ A E - ∠ A F - ∠ P E + ∠ P F = 0)
+    (h₂ : ∠ B F - ∠ B D - ∠ P F + ∠ P D = 0)
+    (h₃ : ∠ C D - ∠ C E - ∠ P D + ∠ P E = 0)
+    (l₁ : ∠ A E = ∠ C E) (l₂ : ∠ A F = ∠ B F)
+    (nl₃ : ¬∠ B D = ∠ C D) : False := by
+  -- lean_geom
+  have h_1 : ∠ B D = ∠ C D := by linear_combination (norm := abel) -h₁ - h₂ - h₃ + l₁ - l₂
+  absurd nl₃
+  exact h_1
 
-#synth Zero (Real.Angle)
+
+example (B C D : ℂ) (h : ∠ B D = ∠ C D) (g : ¬∠ B D = ∠ C D) : False := by
+  lean_geom

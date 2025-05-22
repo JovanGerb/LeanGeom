@@ -26,10 +26,8 @@ def delabRatAngle (angle : RatAngle) : MetaM Term := do
     `($q * Real.pi)
 
 def delabPoint : Point → MetaM Term
-  | ⟨.fvar fvarId⟩ => do
-    let name ← fvarId.getUserName
-    `($(Syntax.mkNameLit name.toString):name)
-  | ⟨point⟩ => throwError "don't know how to elaborate {point}"
+  | ⟨.fvar fvarId⟩ => return mkIdent (← fvarId.getUserName)
+  | ⟨point⟩ => throwError "don't know how to delaborate {point}"
 
 def delabRay (r : Ray) : MetaM Term := do
   let A ← delabPoint r.A
@@ -78,7 +76,7 @@ def delabProposition (prop : Proposition) : MetaM Term := do
 
 
 
-def delabLinearComb (names : Std.HashMap (Atomic Proposition) NameLit) : List (Int × (Atomic Proposition)) → MetaM Term
+def delabLinearComb (names : Std.HashMap (Atomic Proposition) Ident) : List (Int × (Atomic Proposition)) → MetaM Term
   | (n, prop) :: s => do
     let h : Term := names[prop]!
     let (n, n_pos) := (n.natAbs, (n ≥ 0 : Bool))
@@ -101,14 +99,15 @@ def delabLinearComb (names : Std.HashMap (Atomic Proposition) NameLit) : List (I
   | [] => unreachable!
 
 
-def delabReason (reason : Reason) (names : Std.HashMap (Atomic Proposition) NameLit) : MetaM Term := do
+def delabReason (reason : Reason) (prop : Proposition) (names : Std.HashMap (Atomic Proposition) Ident) : MetaM Term := do
   match reason with
   | .app lem args =>
-    let lem ← `($(Syntax.mkNameLit lem.toString):name)
-    let argNames : Array NameLit := args.map (names[·]!)
-    return Syntax.mkApp lem argNames
+    let argNames : Array Ident := args.map (names[·]!)
+    return Syntax.mkApp (mkIdent lem) argNames
   | .angleComb comb => `(by linear_combination (norm := abel) $(← delabLinearComb names comb):term)
   | .given (.fvar fvarId) =>
-    let name ← fvarId.getUserName
-    `($(Syntax.mkNameLit name.toString):name)
-  | .given pf => throwError "don't know how to elaborate proof {pf}"
+    let h ← `(ident| $(mkIdent (← fvarId.getUserName)))
+    match prop with
+    | .angleEqZero _ => `(by linear_combination (norm := abel) $h:term)
+    | .angleNeqZero _ => `(by contrapose! $h; linear_combination (norm := abel) $h:term)
+  | .given pf => throwError "don't know how to delaborate proof {pf}"
