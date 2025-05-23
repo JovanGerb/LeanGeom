@@ -76,8 +76,8 @@ def delabProposition (prop : Proposition) : MetaM Term := do
 
 
 
-def delabLinearComb (names : Std.HashMap (Atomic Proposition) Ident) : List (Int × (Atomic Proposition)) → MetaM Term
-  | (n, prop) :: s => do
+def delabLinearComb (names : Std.HashMap (Atomic Proposition) Ident) : LSum Int (Atomic Proposition) → MetaM Term
+  | .cons n prop s => do
     let h : Term := names[prop]!
     let (n, n_pos) := (n.natAbs, (n ≥ 0 : Bool))
     let h ←
@@ -85,7 +85,7 @@ def delabLinearComb (names : Std.HashMap (Atomic Proposition) Ident) : List (Int
         pure h
       else
         `($(Syntax.mkNatLit n) * $h)
-    if s.isEmpty then
+    if s.isNil then
       if n_pos then
         return h
       else
@@ -96,7 +96,7 @@ def delabLinearComb (names : Std.HashMap (Atomic Proposition) Ident) : List (Int
         `($s + $h)
       else
         `($s - $h)
-  | [] => unreachable!
+  | .nil => unreachable!
 
 
 def delabReason (reason : Reason) (prop : Proposition) (names : Std.HashMap (Atomic Proposition) Ident) : MetaM Term := do

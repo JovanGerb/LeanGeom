@@ -11,9 +11,8 @@ structure RatAngle where
   q_ge : 0 ≤ q := by decide
   q_lt : q < 1 := by decide
 deriving DecidableEq, Hashable, Ord
-
-instance : Repr RatAngle where
-  reprPrec r _ := repr r.q ++ "τ"
+instance : Repr RatAngle := ⟨fun r _ => s!"{r.q}τ"⟩
+instance : Lean.ToMessageData RatAngle := ⟨(m!"{·.q}τ")⟩
 
 namespace RatAngle
 

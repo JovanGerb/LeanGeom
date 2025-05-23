@@ -47,6 +47,11 @@ def foldlM {m : Type → Type} [Monad m] (f : α → G → β → m α) (init : 
 | .nil => pure init
 | .cons g b s => do foldlM f (← f init g b) s
 
+@[specialize]
+def forM {m : Type → Type} [Monad m] (f : G → β → m PUnit) : LSum G β → m PUnit
+| .nil => pure ⟨⟩
+| .cons g b s => do f g b; forM f s
+
 instance [Repr G] [Repr α] : Repr (LSum G α) where
   reprPrec s := reprPrec (s.foldl (init := []) (fun l g a => (g, a) :: l)).reverse
 

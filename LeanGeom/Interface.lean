@@ -47,15 +47,16 @@ def obtainFact (pf : Expr) : StateT Facts MetaM Unit := do
   | ~q(¬($a : Real.Angle) = $b) =>
     let some a ← (obtainAngle a).run | return
     let some b ← (obtainAngle b).run | return
-    modify fun facts => { facts with nangles := facts.angles.push (a - b) }
+    modify fun facts => { facts with nangles := facts.nangles.push (a - b) }
     let prop ← atomize propositionState (.angleNeqZero (a - b))
     addProof prop (.given pf)
   | _ => return
 
 def obtainFacts : TacticM Facts := do
   let mut facts : Facts := {}
-  for decl in (← getLCtx) do
-    facts := (← (obtainFact decl.toExpr).run facts).2
+  for decl in ← getLCtx do
+    unless decl.isImplementationDetail do
+      facts := (← (obtainFact decl.toExpr).run facts).2
   return facts
 
 
@@ -89,19 +90,20 @@ def PrintM.insert (prop : Atomic Proposition) : PrintM Unit := do
     props := s.props.push prop
   }
 
-partial def collectUsedPropsAux (prop : Atomic Proposition) : PrintM Unit := do
+partial def collectUsedPropsAux (prop : Atomic Proposition) : StateT (Std.HashSet (Atomic Proposition)) PrintM Unit := do
   let s ← get
-  if s.names.contains prop then return
+  if s.contains prop then return
+  modify (·.insert prop)
   match ← getProof prop with
   | .app _ args => args.forM collectUsedPropsAux
-  | .angleComb comb => comb.forM (collectUsedPropsAux ·.2)
+  | .angleComb comb => comb.forM (fun _ prop => collectUsedPropsAux prop)
   | .given _ => pure ()
-  .insert prop
+  PrintM.insert prop
 
 def collectUsedProps (pf : CompleteProof) : PrintM Unit := do
   match pf with
-  | .byContra pos neg => collectUsedPropsAux pos; collectUsedPropsAux neg
-  | .angleEqZero comb => comb.forM (collectUsedPropsAux ·.2)
+  | .byContra pos neg => (do collectUsedPropsAux pos; collectUsedPropsAux neg).run' {}
+  | .angleEqZero comb => comb.forM (collectUsedPropsAux ·.2) |>.run' {}
 
 def delabLine (prop : Atomic Proposition) : PrintM Lean.Syntax.Tactic := do
   let { names, .. } ← get
@@ -136,14 +138,15 @@ elab "lean_geom" : tactic => withMainContext do
 example (A B C D E F P : ℂ)
     (h₁ : ∠ A E - ∠ A F - ∠ P E + ∠ P F = 0)
     (h₂ : ∠ B F - ∠ B D - ∠ P F + ∠ P D = 0)
-    (h₃ : ∠ C D - ∠ C E - ∠ P D + ∠ P E = 0)
-    (l₁ : ∠ A E = ∠ C E) (l₂ : ∠ A F = ∠ B F)
+    (h₃ : ∠ C D + ∠ C E - ∠ P D + ∠ P E = 0)
+    (l₁ : ∠ A E = -∠ C E) (l₂ : ∠ A F = ∠ B F)
     (nl₃ : ¬∠ B D = ∠ C D) : False := by
-  -- lean_geom
-  have h_1 : ∠ B D = ∠ C D := by linear_combination (norm := abel) -h₁ - h₂ - h₃ + l₁ - l₂
-  absurd nl₃
-  exact h_1
-
-
-example (B C D : ℂ) (h : ∠ B D = ∠ C D) (g : ¬∠ B D = ∠ C D) : False := by
   lean_geom
+--   have h_1 : ∠ B D = ∠ C D := by linear_combination (norm := abel) -h₁ - h₂ - h₃ + l₁ - l₂
+--   absurd nl₃
+--   exact h_1
+
+-- #eval (-1:Int)/1
+
+-- example (B C D : ℂ) (h : ∠ B D = ∠ C D) (g : ¬∠ B D = ∠ C D) : False := by
+--   lean_geom

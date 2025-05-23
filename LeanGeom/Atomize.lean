@@ -2,7 +2,8 @@ import Std
 
 structure Atomic (α : Type) where
   id : Nat
-deriving Inhabited, Repr
+deriving Inhabited
+instance {α}: Repr (Atomic α) := ⟨fun ⟨id⟩ _ => s!"⟨{id}⟩"⟩
 
 variable {α : Type} [BEq α] [Hashable α]
 
