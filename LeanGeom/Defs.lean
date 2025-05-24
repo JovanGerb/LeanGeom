@@ -1,4 +1,3 @@
-import Lean
 import LeanGeom.Util
 import LeanGeom.LComb
 import LeanGeom.Atomize
@@ -6,7 +5,7 @@ import LeanGeom.Atomize
 open Lean
 
 structure Point where
-  self : Lean.Expr
+  self : Expr
 deriving Inhabited, BEq, Hashable
 instance : ToMessageData Point := ⟨(m!"{·.1}")⟩
 
@@ -42,30 +41,15 @@ instance : ToMessageData Proposition where
     | .angleEqZero angle => m!"{angle} = 0"
     | .angleNeqZero angle => m!"{angle} ≠ 0"
 
-initialize propositionState : IO.Ref (AtomContext Proposition) ← IO.mkRef {}
-
 inductive Reason where
-| app (lem : Lean.Name) (args : Array (Atomic Proposition))
+| app (lem : Name) (args : Array (Atomic Proposition))
 | angleComb (comb : LSum Int (Atomic Proposition))
-| given (pf : Lean.Expr)
+| given (pf : Expr)
 deriving Inhabited, BEq
-
-initialize proofState : IO.Ref (Std.HashMap (Atomic Proposition) Reason) ← IO.mkRef {}
-
-def addProof (prop : Atomic Proposition) (pf : Reason) : IO Unit := do
-  if !(← proofState.get).contains prop then
-    proofState.modify (·.insert prop pf)
-
-def getProof (prop : Atomic Proposition) : MetaM Reason := do
-  match (← proofState.get)[prop]? with
-  | some pf => return pf
-  | none => throwError "proposition {← deAtomize propositionState prop} doesn't have a proof"
 
 inductive CompleteProof where
 | byContra (pos neg : Atomic Proposition)
 | angleEqZero (comb : List (Int × Atomic Proposition))
-
-initialize completeProofState : IO.Ref (Option CompleteProof) ← IO.mkRef none
 
 
 structure Facts where
@@ -73,3 +57,50 @@ structure Facts where
   nangles : Array AngleSum := #[]
 instance : ToMessageData Facts where
   toMessageData facts := m!"{facts.angles}\n{facts.nangles}"
+
+
+
+structure Ray' where (A B : Atomic Point)
+  deriving Inhabited, BEq, Hashable, Repr
+
+structure SolveCtx where
+  point : AtomContext Point := {}
+  ray : AtomContext Ray' := {}
+  angle : IntCombContext (Atomic Ray') RatAngle (Atomic Proposition) := {}
+
+
+
+structure GeomState where
+  props : AtomContext Proposition := {}
+  proofs : Std.HashMap (Atomic Proposition) Reason := {}
+  result : Option CompleteProof := none
+  facts : Facts := {}
+  context : SolveCtx := {}
+
+
+abbrev GeomM := StateRefT GeomState MetaM
+
+def GeomM.run {α : Type} (x : GeomM α) : MetaM α := StateRefT'.run' x {}
+
+instance : MonadAtom Proposition GeomM := ⟨return (← get).props, (modify fun s => { s with props := · s.props })⟩
+
+instance : MonadAtom Point GeomM := ⟨return (← get).context.point, (modify fun s => { s with context.point := · s.context.point })⟩
+instance : MonadAtom Ray'  GeomM := ⟨return (← get).context.ray  , (modify fun s => { s with context.ray   := · s.context.ray   })⟩
+
+instance : MonadIntComb (Atomic Ray') RatAngle (Atomic Proposition) GeomM := ⟨modifyGet fun s => (s.context.angle, { s with context.angle := {} }), fun ctx => modify ({ · with context.angle := ctx })⟩
+
+@[inline] def modifyFacts (f : Facts → Facts) : GeomM Unit :=
+  modify fun s => { s with facts := f s.facts }
+
+def addProof (prop : Atomic Proposition) (pf : Reason) : GeomM Unit := do
+  if !(← get).proofs.contains prop then
+    modify fun s => { s with proofs := s.proofs.insert prop pf }
+
+def getProof (prop : Atomic Proposition) : GeomM Reason := do
+  match (← get).proofs[prop]? with
+  | some pf => return pf
+  | none => throwError "proposition {← deAtomize prop} doesn't have a proof"
+
+def addCompleteProof {α : Type} (pf : CompleteProof) : GeomM α := do
+  modify fun s => { s with result := pf }
+  throwError "the problem has been solved"

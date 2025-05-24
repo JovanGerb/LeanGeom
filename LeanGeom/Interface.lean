@@ -34,31 +34,28 @@ partial def obtainAngle (x : Q(Real.Angle)) : OptionT MetaM AngleSum := do
   | ~q(0) => return { sum := [], θ := 0}
   | _ => failure
 
-def obtainFact (pf : Expr) : StateT Facts MetaM Unit := do
+def obtainFact (pf : Expr) : GeomM Unit := do
   let ⟨0, x, pf⟩ ← inferTypeQ pf | return
   match x with
   | ~q(($a : Real.Angle) = $b) =>
     let some a ← (obtainAngle a).run | return
     let some b ← (obtainAngle b).run | return
-    modify fun facts => { facts with angles := facts.angles.push (a - b) }
-    let prop ← atomize propositionState (.angleEqZero (a - b))
+    modifyFacts fun facts => { facts with angles := facts.angles.push (a - b) }
+    let prop ← atomize (.angleEqZero (a - b))
     addProof prop (.given pf)
   -- | ~q(($a : Real.Angle) ≠ $b)
   | ~q(¬($a : Real.Angle) = $b) =>
     let some a ← (obtainAngle a).run | return
     let some b ← (obtainAngle b).run | return
-    modify fun facts => { facts with nangles := facts.nangles.push (a - b) }
-    let prop ← atomize propositionState (.angleNeqZero (a - b))
+    modifyFacts fun facts => { facts with nangles := facts.nangles.push (a - b) }
+    let prop ← atomize (.angleNeqZero (a - b))
     addProof prop (.given pf)
   | _ => return
 
-def obtainFacts : TacticM Facts := do
-  let mut facts : Facts := {}
+def obtainFacts : GeomM Unit := do
   for decl in ← getLCtx do
     unless decl.isImplementationDetail do
-      facts := (← (obtainFact decl.toExpr).run facts).2
-  return facts
-
+      obtainFact decl.toExpr
 
 
 
@@ -68,7 +65,7 @@ structure ProofState where
   props : Array (Atomic Proposition) := #[]
   nameGen : NameGenerator := { namePrefix := `h }
 
-abbrev PrintM := StateT ProofState TermElabM
+abbrev PrintM := StateT ProofState GeomM
 
 partial def nextName : PrintM Name := do
   let { nameGen, .. } ← get
@@ -108,7 +105,7 @@ def collectUsedProps (pf : CompleteProof) : PrintM Unit := do
 def delabLine (prop : Atomic Proposition) : PrintM Lean.Syntax.Tactic := do
   let { names, .. } ← get
   let nameStx := names[prop]!
-  let prop' ← deAtomize propositionState prop
+  let prop' ← deAtomize prop
   let propStx ← delabProposition prop'
   let pf ← getProof prop
   let pfStx ← delabReason pf prop' names
@@ -129,11 +126,16 @@ def delabCompleteProof (pf : CompleteProof) : PrintM (TSyntax `Lean.Parser.Tacti
 
 
 elab "lean_geom" : tactic => withMainContext do
-  let facts ← obtainFacts
-  let some proof ← getSolution facts | throwError "no solution was found"
-  let solution ← delabCompleteProof proof |>.run' {}
+  let solution ← GeomM.run do
+    obtainFacts
+    let some proof ← getSolution | throwError "no solution was found"
+    delabCompleteProof proof |>.run' {}
   logInfo m! "{solution}"
   Elab.Tactic.evalTactic solution
+
+-- example : 0 = ((2 * (2 * Real.pi) : ℝ) : Real.Angle) := by
+--   hint
+--   abel
 
 example (A B C D E F P : ℂ)
     (h₁ : ∠ A E - ∠ A F - ∠ P E + ∠ P F = 0)

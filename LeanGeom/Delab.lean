@@ -1,8 +1,6 @@
-import Batteries
+import Batteries.Data.Rat.Basic
 import LeanGeom.Defs
-import Mathlib.Geometry.Euclidean.Angle.Oriented.Basic
-
-notation "∠" A:max B:max => Complex.orientation.oangle A B
+import LeanGeom.Tactics
 
 open Lean
 
